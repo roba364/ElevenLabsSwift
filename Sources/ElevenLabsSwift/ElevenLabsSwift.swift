@@ -797,16 +797,16 @@ public class ElevenLabsSDK {
                 }
             }
         }
-        
+
         public var conversationVolume: Float {
-             get {
-                 return volume
-             }
-             set {
-                 volume = newValue
-                 output.mixer.volume = newValue
-             }
-         }
+            get {
+                return volume
+            }
+            set {
+                volume = newValue
+                output.mixer.volume = newValue
+            }
+        }
 
         private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) {
             switch message {
