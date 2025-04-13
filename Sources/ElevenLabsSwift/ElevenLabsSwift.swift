@@ -5,7 +5,7 @@ import os.log
 
 /// Main class for ElevenLabsSwift package
 public class ElevenLabsSDK {
-    public static let version = "1.0.1"
+    public static let version = "1.1.2"
 
     private enum Constants {
         static let defaultApiOrigin = "wss://api.elevenlabs.io"
@@ -795,6 +795,16 @@ public class ElevenLabsSDK {
                 if self.status == .connected {
                     self.receiveMessages()
                 }
+            }
+        }
+
+        public var conversationVolume: Float {
+            get {
+                return volume
+            }
+            set {
+                volume = newValue
+                output.mixer.volume = newValue
             }
         }
 
