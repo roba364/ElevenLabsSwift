@@ -1,4 +1,4 @@
-# Elevenlabs Conversational AI Swift SDK (experimental)
+# Elevenlabs Conversational AI Swift SDK
 
 ![convai222](https://github.com/user-attachments/assets/ca4fa726-5e98-4bbc-91b2-d055e957df7d)
 
