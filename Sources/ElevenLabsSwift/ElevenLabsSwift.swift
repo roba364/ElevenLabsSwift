@@ -16,7 +16,7 @@ public class ElevenLabsSDK {
         static let volumeUpdateInterval: TimeInterval = 0.1
         static let fadeOutDuration: TimeInterval = 2.0
         static let bufferSize: AVAudioFrameCount = 1024
-        
+
         // WebSocket message size limits
         static let maxWebSocketMessageSize = 1024 * 1024 // 1MB WebSocket limit
         static let safeMessageSize = 750 * 1024 // 750KB - safely under the limit
@@ -780,14 +780,14 @@ public class ElevenLabsSDK {
         private func setupWebSocket() {
             callbacks.onConnect(connection.conversationId)
             updateStatus(.connected)
-            
+
             // Configure WebSocket for larger messages if possible
             if let urlSessionTask = connection.socket as? URLSessionWebSocketTask {
                 if #available(iOS 15.0, macOS 12.0, *) {
                     urlSessionTask.maximumMessageSize = Constants.maxRequestedMessageSize
                 }
             }
-            
+
             receiveMessages()
         }
 
@@ -824,7 +824,7 @@ public class ElevenLabsSDK {
         private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) {
             switch message {
             case let .string(text):
-        
+
                 guard let data = text.data(using: .utf8),
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let type = json["type"] as? String
@@ -948,19 +948,19 @@ public class ElevenLabsSDK {
                   let audioBase64 = event["audio_base_64"] as? String,
                   let eventId = event["event_id"] as? Int,
                   lastInterruptTimestamp <= eventId else { return }
-            
+
             // Check if we need to split the audio chunk for WebSocket size limits
             if audioBase64.utf8.count > Constants.maxWebSocketMessageSize {
                 // Split the base64 string into multiple parts to process separately
                 let chunkSize = Constants.safeMessageSize
                 var offset = 0
-                
+
                 while offset < audioBase64.count {
                     let endIndex = min(offset + chunkSize, audioBase64.count)
                     let startIndex = audioBase64.index(audioBase64.startIndex, offsetBy: offset)
                     let endStringIndex = audioBase64.index(audioBase64.startIndex, offsetBy: endIndex)
-                    let subChunk = String(audioBase64[startIndex..<endStringIndex])
-                    
+                    let subChunk = String(audioBase64[startIndex ..< endStringIndex])
+
                     addAudioBase64Chunk(subChunk)
                     offset = endIndex
                 }
@@ -968,7 +968,7 @@ public class ElevenLabsSDK {
                 // Process the whole chunk
                 addAudioBase64Chunk(audioBase64)
             }
-            
+
             updateMode(.speaking)
         }
 
@@ -986,7 +986,7 @@ public class ElevenLabsSDK {
                 callbacks.onError("Failed to encode message", message)
                 return
             }
-            
+
             connection.socket.send(.string(string)) { [weak self] error in
                 if let error = error {
                     self?.logger.error("Failed to send WebSocket message: \(error.localizedDescription)")
@@ -1018,13 +1018,13 @@ public class ElevenLabsSDK {
                         while frameOffset < frameLength {
                             let framesInChunk = min(framesPerChunk, frameLength - frameOffset)
                             let bytesInChunk = framesInChunk * MemoryLayout<Int16>.size
-                            
+
                             let chunkData = Data(bytes: int16ChannelData[0].advanced(by: frameOffset), count: bytesInChunk)
                             let base64String = chunkData.base64EncodedString()
-                            
+
                             let message: [String: Any] = ["type": "user_audio_chunk", "user_audio_chunk": base64String]
                             self.sendWebSocketMessage(message)
-                            
+
                             frameOffset += framesInChunk
                         }
                     }
@@ -1080,15 +1080,15 @@ public class ElevenLabsSDK {
             }
 
             let frameCount = data.count / MemoryLayout<Int16>.size
-            
+
             if frameCount > 0 {
                 guard let audioBuffer = AVAudioPCMBuffer(pcmFormat: audioFormat, frameCapacity: AVAudioFrameCount(frameCount)) else {
                     callbacks.onError("Failed to create AVAudioPCMBuffer", nil)
                     return
                 }
-                
+
                 audioBuffer.frameLength = AVAudioFrameCount(frameCount)
-                
+
                 data.withUnsafeBytes { (int16Buffer: UnsafeRawBufferPointer) in
                     guard let int16Pointer = int16Buffer.bindMemory(to: Int16.self).baseAddress else { return }
                     if let floatChannelData = audioBuffer.floatChannelData {
@@ -1097,7 +1097,7 @@ public class ElevenLabsSDK {
                         }
                     }
                 }
-                
+
                 audioBufferLock.withLock {
                     audioBuffers.append(audioBuffer)
                 }
