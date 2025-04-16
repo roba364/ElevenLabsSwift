@@ -2,7 +2,7 @@
 
 ![convai222](https://github.com/user-attachments/assets/ca4fa726-5e98-4bbc-91b2-d055e957df7d)
 
-Elevenlabs Conversational AI Swift SDK is a framework designed to integrate ElevenLabs' powerful conversational AI capabilities into your Swift applications. Leverage advanced audio processing and seamless WebSocket communication to create interactive and intelligent conversational voivce experiences.
+Elevenlabs Conversational AI Swift SDK is a framework designed to integrate ElevenLabs' powerful conversational AI capabilities into your Swift applications. Leverage advanced audio processing and seamless WebSocket communication to create interactive and intelligent conversational voice experiences.
 
 For detailed documentation, visit the [ElevenLabs Swift SDK documentation](https://elevenlabs.io/docs/conversational-ai/libraries/conversational-ai-sdk-swift).
 
