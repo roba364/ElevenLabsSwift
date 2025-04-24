@@ -14,11 +14,12 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/daltoniam/Starscream.git", from: "4.0.0"),
+        .package(url: "https://github.com/devicekit/DeviceKit.git", from: "5.6.0"),
     ],
     targets: [
         .target(
             name: "ElevenLabsSDK",
-            dependencies: ["Starscream"]
+            dependencies: ["Starscream", "DeviceKit"]
         ),
     ]
 )

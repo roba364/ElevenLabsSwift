@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import DeviceKit
 import Foundation
 import os.log
 
@@ -218,6 +219,45 @@ public class ElevenLabsSDK {
                 break
             }
         }
+    }
+
+    // MARK: - Device Check
+
+    /// Checks if the current device is likely an iPhone 13 or older model using DeviceKit.
+    private static func isOlderDeviceModel_DeviceKit() -> Bool {
+        let currentDevice = Device.current
+        let logger = Logger(subsystem: "com.elevenlabs.ElevenLabsSDK", category: "DeviceCheck")
+
+        // Define the array of older iPhone models (up to iPhone 13 series)
+        // Note: This array might need updates if DeviceKit adds more specific older models or you need to support very old ones.
+        let olderModels: [Device] = [
+            // iPhone 13 Series
+            .iPhone13, .iPhone13Mini, .iPhone13Pro, .iPhone13ProMax,
+            // iPhone SE Series (relevant generations)
+            .iPhoneSE2, .iPhoneSE3, // Assuming SE 2/3 fall under 'older'
+            // iPhone 12 Series
+            .iPhone12, .iPhone12Mini, .iPhone12Pro, .iPhone12ProMax,
+            // iPhone 11 Series
+            .iPhone11, .iPhone11Pro, .iPhone11ProMax,
+            // iPhone X Series
+            .iPhoneX, .iPhoneXR, .iPhoneXS, .iPhoneXSMax,
+            // iPhone 8 Series
+            .iPhone8, .iPhone8Plus,
+            // iPhone 7 Series
+            .iPhone7, .iPhone7Plus,
+            // Older SE
+            .iPhoneSE,
+            // Add older models here if needed (e.g., .iPhone6s, .iPhone6sPlus, etc.)
+        ]
+
+        if currentDevice.isPhone && olderModels.contains(currentDevice) {
+            logger.debug("DeviceKit check: Detected older iPhone model (\(currentDevice.description)). Applying workaround.")
+            return true
+        }
+
+        // Covers iPhone 14 series and newer, iPads, iPods, Simulators, unknown devices.
+        logger.debug("DeviceKit check: Detected newer iPhone model (\(currentDevice.description)) or non-applicable device. No workaround needed.")
+        return false
     }
 
     // MARK: - Connection
@@ -768,8 +808,27 @@ public class ElevenLabsSDK {
             // Step 5: Initialize the Conversation
             let conversation = Conversation(connection: connection, input: input, output: output, callbacks: callbacks, clientTools: clientTools)
 
-            // Step 6: Start playing audio
+            // Step 6: Start playing audio (implicitly activates session and engine)
             try output.startPlaying()
+            conversation.logger.info("Audio engine started.")
+
+            // Step 6.5: Apply speaker output override for older devices
+            if isOlderDeviceModel_DeviceKit() { // Use the new DeviceKit-based check
+                conversation.logger.info("Applying speaker override for older device model.")
+                // Dispatch after a short delay to ensure session/engine are fully ready
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { // 0.5s delay, adjust if needed
+                    do {
+                        try AVAudioSession.sharedInstance().overrideOutputAudioPort(.speaker)
+                        conversation.logger.info("Successfully overridden output audio port to speaker.")
+                    } catch {
+                        conversation.logger.error("Failed to override output audio port to speaker: \(error.localizedDescription)")
+                        // Optionally trigger onError callback
+                        // conversation.callbacks.onError("Failed to set speaker output", error)
+                    }
+                }
+            } else {
+                conversation.logger.info("Speaker override not needed for this device model.")
+            }
 
             // Step 7: Start recording
             conversation.startRecording()
@@ -1252,26 +1311,36 @@ public class ElevenLabsSDK {
 
     private static func configureAudioSession() throws {
         let audioSession = AVAudioSession.sharedInstance()
+        let logger = Logger(subsystem: "com.elevenlabs.ElevenLabsSDK", category: "AudioSession")
+
         do {
-            // Configure for voice chat with minimum latency
-            try audioSession.setCategory(.playAndRecord, mode: .voiceChat, options: [.defaultToSpeaker, .allowBluetooth])
+            // ALWAYS configure with .voiceChat initially. The override handles older devices later.
+            let sessionMode: AVAudioSession.Mode = .voiceChat
+            logger.info("Configuring session with category: .playAndRecord, mode: .voiceChat")
+            try audioSession.setCategory(.playAndRecord, mode: sessionMode, options: [.defaultToSpeaker, .allowBluetooth])
 
-            // Set preferred IO buffer duration for lower latency
-            try audioSession.setPreferredIOBufferDuration(0.005) // 5ms buffer
+            // Keep preferred settings
+            try audioSession.setPreferredIOBufferDuration(Constants.ioBufferDuration)
+            logger.debug("Set preferred IO buffer duration to \(Constants.ioBufferDuration)")
 
-            // Set preferred sample rate to match our target Note most IOS devices aren't able to go down this low
-            try audioSession.setPreferredSampleRate(16000)
+            try audioSession.setPreferredSampleRate(Constants.inputSampleRate)
+            logger.debug("Set preferred sample rate to \(Constants.inputSampleRate)")
 
-            // Request input gain control if available
+            // Set input gain if possible
             if audioSession.isInputGainSettable {
                 try audioSession.setInputGain(1.0)
+                logger.debug("Set input gain to 1.0")
+            } else {
+                logger.debug("Input gain is not settable.")
             }
 
             // Activate the session
             try audioSession.setActive(true, options: .notifyOthersOnDeactivation)
+            logger.info("Audio session configured and activated.")
 
         } catch {
-            print("Failed to configure audio session: \(error.localizedDescription)")
+            logger.error("Failed to configure audio session: \(error.localizedDescription)")
+            print("ElevenLabsSDK: Failed to configure audio session: \(error.localizedDescription)")
             throw error
         }
     }
