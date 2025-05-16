@@ -1213,6 +1213,15 @@ public class ElevenLabsSDK {
             callbacks.onStatusChange(newStatus)
         }
 
+        /// Send a contextual update event
+        public func sendContextualUpdate(_ text: String) {
+            let event: [String: Any] = [
+                "type": "contextual_update",
+                "text": text
+            ]
+            sendWebSocketMessage(event)
+        }
+
         /// Ends the current conversation session
         public func endSession() {
             guard status == .connected else { return }
