@@ -667,6 +667,13 @@ public class ElevenLabsSDK {
         public var onModeChange: @Sendable (Mode) -> Void = { _ in }
         public var onVolumeUpdate: @Sendable (Float) -> Void = { _ in }
 
+        /// A callback that informs about a message correction.
+        /// - Parameters:
+        ///   - original: The original message. (Type: `String`)
+        ///   - corrected: The corrected message. (Type: `String`)
+        ///   - role: The role associated with the correction. (Type: `Role`)
+        public var onMessageCorrection: @Sendable (String, String, Role) -> Void = { _, _, _ in }
+        
         public init() {}
     }
 
@@ -901,6 +908,9 @@ public class ElevenLabsSDK {
 
                 case "agent_response":
                     handleAgentResponseEvent(json)
+                    
+                case "agent_response_correction":
+                    handleAgentResponseCorrectionEvent(json)
 
                 case "user_transcript":
                     handleUserTranscriptEvent(json)
@@ -994,6 +1004,13 @@ public class ElevenLabsSDK {
             guard let event = json["agent_response_event"] as? [String: Any],
                   let response = event["agent_response"] as? String else { return }
             callbacks.onMessage(response, .ai)
+        }
+        
+        private func handleAgentResponseCorrectionEvent(_ json: [String: Any]) {
+            guard let event = json["agent_response_correction_event"] as? [String: Any],
+                  let original_response = event["original_agent_response"] as? String,
+                  let corrected_response = event["corrected_agent_response"] as? String else { return }
+            callbacks.onMessageCorrection(original_response, corrected_response, .ai)
         }
 
         private func handleUserTranscriptEvent(_ json: [String: Any]) {
