@@ -1218,7 +1218,7 @@ public class ElevenLabsSDK {
         public func sendContextualUpdate(_ text: String) {
             let event: [String: Any] = [
                 "type": "contextual_update",
-                "text": text
+                "text": text,
             ]
             sendWebSocketMessage(event)
         }
@@ -1228,7 +1228,7 @@ public class ElevenLabsSDK {
         // triggers a turn without requiring audio, audio still processed
         public func sendUserMessage(_ text: String? = nil) {
             var event: [String: Any] = [
-                "type": "user_message"
+                "type": "user_message",
             ]
             if let text = text {
                 event["text"] = text
@@ -1239,7 +1239,7 @@ public class ElevenLabsSDK {
         /// Send a user activity event , prevents interruption due to turn timeout
         public func sendUserActivity() {
             let event: [String: Any] = [
-                "type": "user_activity"
+                "type": "user_activity",
             ]
             sendWebSocketMessage(event)
         }
