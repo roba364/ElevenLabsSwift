@@ -673,7 +673,7 @@ public class ElevenLabsSDK {
         ///   - corrected: The corrected message. (Type: `String`)
         ///   - role: The role associated with the correction. (Type: `Role`)
         public var onMessageCorrection: @Sendable (String, String, Role) -> Void = { _, _, _ in }
-        
+
         public init() {}
     }
 
@@ -863,7 +863,6 @@ public class ElevenLabsSDK {
 
                 switch result {
                 case let .success(message):
-
                     self.handleWebSocketMessage(message)
                 case let .failure(error):
                     self.logger.error("WebSocket error: \(error.localizedDescription)")
@@ -890,7 +889,6 @@ public class ElevenLabsSDK {
         private func handleWebSocketMessage(_ message: URLSessionWebSocketTask.Message) {
             switch message {
             case let .string(text):
-
                 guard let data = text.data(using: .utf8),
                       let json = try? JSONSerialization.jsonObject(with: data, options: []) as? [String: Any],
                       let type = json["type"] as? String
@@ -908,7 +906,7 @@ public class ElevenLabsSDK {
 
                 case "agent_response":
                     handleAgentResponseEvent(json)
-                    
+
                 case "agent_response_correction":
                     handleAgentResponseCorrectionEvent(json)
 
@@ -1005,7 +1003,7 @@ public class ElevenLabsSDK {
                   let response = event["agent_response"] as? String else { return }
             callbacks.onMessage(response, .ai)
         }
-        
+
         private func handleAgentResponseCorrectionEvent(_ json: [String: Any]) {
             guard let event = json["agent_response_correction_event"] as? [String: Any],
                   let original_response = event["original_agent_response"] as? String,
@@ -1234,7 +1232,7 @@ public class ElevenLabsSDK {
         public func sendContextualUpdate(_ text: String) {
             let event: [String: Any] = [
                 "type": "contextual_update",
-                "text": text
+                "text": text,
             ]
             sendWebSocketMessage(event)
         }
