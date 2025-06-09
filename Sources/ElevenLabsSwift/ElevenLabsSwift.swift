@@ -897,6 +897,8 @@ public class ElevenLabsSDK {
                     return
                 }
 
+                print("---> type: \(type)")
+
                 switch type {
                 case "client_tool_call":
                     handleClientToolCall(json)
