@@ -674,19 +674,21 @@ public class ElevenLabsSDK {
         ///   - role: The role associated with the correction. (Type: `Role`)
         public var onMessageCorrection: @Sendable (String, String, Role) -> Void = { _, _, _ in }
 
-        // НОВЫЕ CALLBACK'И ДЛЯ AUDIO EVENTS
-        /// Вызывается когда начинается воспроизведение аудио от агента
-        /// - Parameter eventId: ID события аудио
-        public var onAudioPlaybackStart: @Sendable (Int) -> Void = { _ in }
-
-        /// Вызывается когда заканчивается воспроизведение аудио от агента
-        public var onAudioPlaybackEnd: @Sendable () -> Void = {}
-
-        /// Вызывается для каждого аудио чанка (опционально, для детального трекинга)
+        /// Вызывается при получении первого аудио чанка для нового события
         /// - Parameters:
-        ///   - eventId: ID события
-        ///   - chunkSize: размер чанка в байтах
-        public var onAudioChunkReceived: @Sendable (Int, Int) -> Void = { _, _ in }
+        ///   - eventId: ID аудио события
+        ///   - estimatedDuration: примерная длительность в секундах (если доступна)
+        public var onAudioEventStart: @Sendable (Int) -> Void = { _ in }
+
+        /// Вызывается когда все аудио чанки для события получены
+        /// - Parameter eventId: ID аудио события
+        public var onAudioEventComplete: @Sendable () -> Void = { }
+
+        /// Вызывается для отслеживания прогресса воспроизведения
+        /// - Parameters:
+        ///   - eventId: ID текущего аудио события
+        ///   - progress: прогресс от 0.0 до 1.0
+        public var onAudioPlaybackProgress: @Sendable (Int) -> Void = { _ in }
 
         public init() {}
     }
@@ -760,6 +762,109 @@ public class ElevenLabsSDK {
             set { isAudioPlayingLock.withLock { isAudioPlaying = newValue } }
         }
 
+        // MARK: - Дополнительные свойства для точного отслеживания
+        private var scheduledBuffersCount: Int = 0
+        private var playedBuffersCount: Int = 0
+        private var scheduledBuffersLock = NSLock()
+        private var audioPlaybackTimer: Timer?
+
+        // MARK: - Обработка завершения буфера
+        private func onBufferFinished() {
+            scheduledBuffersLock.withLock {
+                playedBuffersCount += 1
+            }
+
+            // Проверяем, не завершилось ли воспроизведение
+            checkPlaybackCompletion()
+        }
+
+        // MARK: - Проверка завершения воспроизведения
+        private func checkPlaybackCompletion() {
+            // Небольшая задержка чтобы убедиться что новые буферы не поступают
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+                guard let self = self else { return }
+
+                let hasNoMoreBuffers = self.audioBufferLock.withLock { self.audioBuffers.isEmpty }
+                let allBuffersPlayed = self.scheduledBuffersLock.withLock {
+                    self.playedBuffersCount >= self.scheduledBuffersCount
+                }
+
+                if hasNoMoreBuffers && allBuffersPlayed && self.audioPlaying {
+                    self.onAudioPlaybackCompleted()
+                }
+            }
+        }
+
+        // MARK: - Завершение воспроизведения аудио
+        private func onAudioPlaybackCompleted() {
+            guard audioPlaying else { return }
+
+            audioPlaying = false
+            currentAudioEventId = nil
+
+            // Сбрасываем счетчики
+            scheduledBuffersLock.withLock {
+                scheduledBuffersCount = 0
+                playedBuffersCount = 0
+            }
+
+            logger.info("Audio playback completed naturally")
+            callbacks.onAudioEventComplete()
+
+            // Переключаем режим на прослушивание
+            updateMode(.listening)
+        }
+
+        // MARK: - Улучшенная обработка прерываний
+        private func handleInterruptionEventImproved(_ json: [String: Any]) {
+            guard let event = json["interruption_event"] as? [String: Any],
+                  let eventId = event["event_id"] as? Int else { return }
+
+            lastInterruptTimestamp = eventId
+
+            // УВЕДОМЛЕНИЕ О ПРИНУДИТЕЛЬНОМ ЗАВЕРШЕНИИ АУДИО
+            if audioPlaying {
+                audioPlaying = false
+                currentAudioEventId = nil
+
+                // Сбрасываем счетчики при прерывании
+                scheduledBuffersLock.withLock {
+                    scheduledBuffersCount = 0
+                    playedBuffersCount = 0
+                }
+
+                logger.info("Audio playbook interrupted by event ID: \(eventId)")
+                callbacks.onAudioEventComplete() // Уведомляем о завершении даже при прерывании
+            }
+
+            fadeOutAudio()
+            clearAudioBuffers()
+            stopPlayback()
+        }
+
+        // MARK: - Мониторинг состояния AVAudioPlayerNode
+        private func startAudioPlayerMonitoring() {
+            audioPlaybackTimer?.invalidate()
+            audioPlaybackTimer = Timer.scheduledTimer(withTimeInterval: 0.1, repeats: true) { [weak self] _ in
+                guard let self = self else { return }
+
+                // Проверяем реальное состояние плеера
+                if self.audioPlaying && !self.output.playerNode.isPlaying {
+                    let hasBuffers = !self.audioBufferLock.withLock { self.audioBuffers.isEmpty }
+
+                    // Если нет буферов и плеер не играет, значит воспроизведение завершено
+                    if !hasBuffers {
+                        self.onAudioPlaybackCompleted()
+                    }
+                }
+            }
+        }
+
+        private func stopAudioPlayerMonitoring() {
+            audioPlaybackTimer?.invalidate()
+            audioPlaybackTimer = nil
+        }
+
         private func setupInputVolumeMonitoring() {
             DispatchQueue.main.async {
                 self.inputVolumeUpdateTimer = Timer.scheduledTimer(withTimeInterval: self.inputVolumeUpdateInterval, repeats: true) { [weak self] _ in
@@ -812,7 +917,7 @@ public class ElevenLabsSDK {
                     if self.audioPlaying {
                         self.audioPlaying = false
                         self.logger.info("Audio playback ended")
-                        self.callbacks.onAudioPlaybackEnd()
+                        self.callbacks.onAudioEventComplete()
                     }
                     self.updateMode(.listening)
                 }
@@ -934,7 +1039,7 @@ public class ElevenLabsSDK {
                     handleClientToolCall(json)
 
                 case "interruption":
-                    handleInterruptionEvent(json)
+                    handleInterruptionEventImproved(json)
 
                 case "agent_response":
                     handleAgentResponseEvent(json)
@@ -1028,7 +1133,7 @@ public class ElevenLabsSDK {
             if audioPlaying {
                 audioPlaying = false
                 logger.info("Audio playback interrupted by event ID: \(eventId)")
-                callbacks.onAudioPlaybackEnd() // Уведомляем о завершении даже при прерывании
+                callbacks.onAudioEventComplete() // Уведомляем о завершении даже при прерывании
             }
 
             fadeOutAudio()
@@ -1066,12 +1171,12 @@ public class ElevenLabsSDK {
                 audioPlaying = true
                 currentAudioEventId = eventId
                 logger.info("Audio playback started with event ID: \(eventId)")
-                callbacks.onAudioPlaybackStart(eventId)
+                callbacks.onAudioEventStart(eventId)
             }
 
             // Вычисляем размер чанка для callback'а
             let chunkSizeBytes = (audioBase64.utf8.count * 3) / 4 // приблизительный размер после декодирования base64
-            callbacks.onAudioChunkReceived(eventId, chunkSizeBytes)
+            callbacks.onAudioPlaybackProgress(eventId)
 
             // Check if we need to split the audio chunk for WebSocket size limits
             if audioBase64.utf8.count > Constants.maxWebSocketMessageSize {
@@ -1159,6 +1264,8 @@ public class ElevenLabsSDK {
                 // Update volume level
                 self.currentInputVolume = rms
 
+                startAudioPlayerMonitoring()
+
                 // Notify volume changes
                 DispatchQueue.main.async {
                     self.callbacks.onVolumeUpdate(rms)
@@ -1227,10 +1334,10 @@ public class ElevenLabsSDK {
                 }
             }
 
-            scheduleNextBuffer()
+            scheduleNextBufferImproved()
         }
 
-        private func scheduleNextBuffer() {
+        private func scheduleNextBufferImproved() {
             output.audioQueue.async { [weak self] in
                 guard let self = self else { return }
 
@@ -1238,11 +1345,23 @@ public class ElevenLabsSDK {
                     self.audioBuffers.isEmpty ? nil : self.audioBuffers.removeFirst()
                 }
 
-                guard let audioBuffer = buffer else { return }
-
-                self.output.playerNode.scheduleBuffer(audioBuffer) {
-                    self.scheduleNextBuffer()
+                guard let audioBuffer = buffer else {
+                    // Если буферов больше нет, проверим через небольшую задержку завершилось ли воспроизведение
+                    self.checkPlaybackCompletion()
+                    return
                 }
+
+                // Увеличиваем счетчик запланированных буферов
+                self.scheduledBuffersLock.withLock {
+                    self.scheduledBuffersCount += 1
+                }
+
+                self.output.playerNode.scheduleBuffer(audioBuffer) { [weak self] in
+                    // Callback вызывается когда буфер закончил воспроизводиться
+                    self?.onBufferFinished()
+                    self?.scheduleNextBufferImproved()
+                }
+
                 if !self.output.playerNode.isPlaying {
                     self.output.playerNode.play()
                 }
@@ -1313,6 +1432,7 @@ public class ElevenLabsSDK {
         public func endSession() {
             guard status == .connected else { return }
 
+            stopAudioPlayerMonitoring()
             updateStatus(.disconnecting)
             connection.close()
             input.close()
