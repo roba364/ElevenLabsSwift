@@ -674,6 +674,20 @@ public class ElevenLabsSDK {
         ///   - role: The role associated with the correction. (Type: `Role`)
         public var onMessageCorrection: @Sendable (String, String, Role) -> Void = { _, _, _ in }
 
+        // НОВЫЕ CALLBACK'И ДЛЯ AUDIO EVENTS
+        /// Вызывается когда начинается воспроизведение аудио от агента
+        /// - Parameter eventId: ID события аудио
+        public var onAudioPlaybackStart: @Sendable (Int) -> Void = { _ in }
+
+        /// Вызывается когда заканчивается воспроизведение аудио от агента
+        public var onAudioPlaybackEnd: @Sendable () -> Void = {}
+
+        /// Вызывается для каждого аудио чанка (опционально, для детального трекинга)
+        /// - Parameters:
+        ///   - eventId: ID события
+        ///   - chunkSize: размер чанка в байтах
+        public var onAudioChunkReceived: @Sendable (Int, Int) -> Void = { _, _ in }
+
         public init() {}
     }
 
@@ -736,6 +750,16 @@ public class ElevenLabsSDK {
 
         private let logger = Logger(subsystem: "com.elevenlabs.ElevenLabsSDK", category: "Conversation")
 
+        // Новые свойства для отслеживания состояния аудио
+        private var isAudioPlaying: Bool = false
+        private var isAudioPlayingLock = NSLock()
+        private var currentAudioEventId: Int?
+
+        private var audioPlaying: Bool {
+            get { isAudioPlayingLock.withLock { isAudioPlaying } }
+            set { isAudioPlayingLock.withLock { isAudioPlaying = newValue } }
+        }
+
         private func setupInputVolumeMonitoring() {
             DispatchQueue.main.async {
                 self.inputVolumeUpdateTimer = Timer.scheduledTimer(withTimeInterval: self.inputVolumeUpdateInterval, repeats: true) { [weak self] _ in
@@ -780,10 +804,16 @@ public class ElevenLabsSDK {
             self.callbacks = callbacks
             self.clientTools = clientTools
 
-            // Set the onProcess callback
+            // ОБНОВЛЕННЫЙ onProcess callback
             audioConcatProcessor.onProcess = { [weak self] finished in
                 guard let self = self else { return }
                 if finished {
+                    // ОТСЛЕЖИВАНИЕ КОНЦА ВОСПРОИЗВЕДЕНИЯ
+                    if self.audioPlaying {
+                        self.audioPlaying = false
+                        self.logger.info("Audio playback ended")
+                        self.callbacks.onAudioPlaybackEnd()
+                    }
                     self.updateMode(.listening)
                 }
             }
@@ -993,9 +1023,15 @@ public class ElevenLabsSDK {
                   let eventId = event["event_id"] as? Int else { return }
 
             lastInterruptTimestamp = eventId
-            fadeOutAudio()
 
-            // Clear the audio buffers and stop playback
+            // УВЕДОМЛЕНИЕ О ПРИНУДИТЕЛЬНОМ ЗАВЕРШЕНИИ АУДИО
+            if audioPlaying {
+                audioPlaying = false
+                logger.info("Audio playback interrupted by event ID: \(eventId)")
+                callbacks.onAudioPlaybackEnd() // Уведомляем о завершении даже при прерывании
+            }
+
+            fadeOutAudio()
             clearAudioBuffers()
             stopPlayback()
         }
@@ -1025,6 +1061,18 @@ public class ElevenLabsSDK {
                   let eventId = event["event_id"] as? Int,
                   lastInterruptTimestamp <= eventId else { return }
 
+            // ОТСЛЕЖИВАНИЕ НАЧАЛА ВОСПРОИЗВЕДЕНИЯ
+            if !audioPlaying {
+                audioPlaying = true
+                currentAudioEventId = eventId
+                logger.info("Audio playback started with event ID: \(eventId)")
+                callbacks.onAudioPlaybackStart(eventId)
+            }
+
+            // Вычисляем размер чанка для callback'а
+            let chunkSizeBytes = (audioBase64.utf8.count * 3) / 4 // приблизительный размер после декодирования base64
+            callbacks.onAudioChunkReceived(eventId, chunkSizeBytes)
+
             // Check if we need to split the audio chunk for WebSocket size limits
             if audioBase64.utf8.count > Constants.maxWebSocketMessageSize {
                 // Split the base64 string into multiple parts to process separately
@@ -1035,7 +1083,7 @@ public class ElevenLabsSDK {
                     let endIndex = min(offset + chunkSize, audioBase64.count)
                     let startIndex = audioBase64.index(audioBase64.startIndex, offsetBy: offset)
                     let endStringIndex = audioBase64.index(audioBase64.startIndex, offsetBy: endIndex)
-                    let subChunk = String(audioBase64[startIndex ..< endStringIndex])
+                    let subChunk = String(audioBase64[startIndex..<endStringIndex])
 
                     addAudioBase64Chunk(subChunk)
                     offset = endIndex
